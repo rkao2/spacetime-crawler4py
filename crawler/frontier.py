@@ -12,7 +12,9 @@ class Frontier(object):
         self.logger = get_logger("FRONTIER")
         self.config = config
         self.to_be_downloaded = list()
+
         
+        print("Seed URLs:", self.config.seed_urls)
         if not os.path.exists(self.config.save_file) and not restart:
             # Save file does not exist, but request to load save.
             self.logger.info(
@@ -35,6 +37,8 @@ class Frontier(object):
                 for url in self.config.seed_urls:
                     self.add_url(url)
 
+        print("TO_BE_DOWNLOADED after init:", self.to_be_downloaded)
+
     def _parse_save_file(self):
         ''' This function can be overridden for alternate saving techniques. '''
         total_count = len(self.save)
@@ -53,13 +57,20 @@ class Frontier(object):
         except IndexError:
             return None
 
+   
     def add_url(self, url):
         url = normalize(url)
+        print("Normalized URL: ", url)
         urlhash = get_urlhash(url)
+        print("URL hash:", urlhash)
+        print("Already in save?", urlhash in self.save)
         if urlhash not in self.save:
             self.save[urlhash] = (url, False)
             self.save.sync()
             self.to_be_downloaded.append(url)
+            print("Added to to_be_downloaded")
+        else:
+            print("Skipped, already in save")
     
     def mark_url_complete(self, url):
         urlhash = get_urlhash(url)
@@ -70,3 +81,5 @@ class Frontier(object):
 
         self.save[urlhash] = (url, True)
         self.save.sync()
+
+    

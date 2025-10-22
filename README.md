@@ -27,6 +27,7 @@ Admin privileges might be required to execute the commands. Also make sure
 that the terminal is at the root folder of this project.
 ```
 python -m pip install packages/spacetime-2.1.1-py3-none-any.whl
+<!-- python -m pip install /home/rkao4/CS121/Assignment2/packages -->
 python -m pip install -r packages/requirements.txt
 ```
 
