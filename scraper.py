@@ -3,7 +3,7 @@ from urllib.parse import urljoin, urldefrag, urlparse
 from bs4 import BeautifulSoup
 
 
-ALLOWED_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
+# ALLOWED_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
 
 def scraper(url, resp):
     links = extract_next_links(url, resp)
@@ -26,17 +26,17 @@ def extract_next_links(url, resp):
 
     content = resp.raw_response.content
     soup = BeautifulSoup(content, "html.parser")
-    links = []
+    links = set()
 
     for a_tag in soup.find_all("a", href=True):
         href = a_tag["href"]
-        # Resolve relative URLs
-        absolute_url = urljoin(url, href)
-        # Remove fragment (#)
-        absolute_url, _ = urldefrag(absolute_url)
-        links.append(absolute_url)
-   
-    return links
+        joined = urljoin(url, href)
+        if is_valid(joined):
+            links.add(joined)
+
+    print(f"[SCRAPER] Extracted {len(links)} links from {url}")
+
+    return list(links)
 
 def is_valid(url):
     try:
@@ -45,15 +45,13 @@ def is_valid(url):
             return False
         
         # Check allowed domains
-        if not parsed.netloc.endswith(ALLOWED_DOMAINS):
+        if "uci.edu" not in parsed.netloc:
             return False
         
         # Filter out non-HTML resources
         if re.search(
-            r".*\.(css|js|bmp|gif|jpe?g|ico|png|tiff?|mid|mp2|mp3|mp4|wav|avi|mov|mpeg|ram|m4v|mkv|ogg|ogv|pdf"
-            r"|ps|eps|tex|ppt|pptx|doc|docx|xls|xlsx|names|data|dat|exe|bz2|tar|msi|bin|7z|psd|dmg|iso|epub|dll|cnf|tgz|sha1"
-            r"|thmx|mso|arff|rtf|jar|csv|rm|smil|wmv|swf|wma|zip|rar|gz)$",
-            parsed.path.lower()
+            r"\.(jpg|jpeg|png|gif|css|js|pdf|zip|mp4|mp3|avi|mov|wmv|tar|gz|dmg|exe|ico)$",
+            parsed.path.lower(),
         ):
             return False
 
