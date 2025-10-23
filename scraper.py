@@ -1,13 +1,70 @@
 import re
 from urllib.parse import urljoin, urldefrag, urlparse
 from bs4 import BeautifulSoup
+import time
+import hashlib
+from collections import defaultdict
 
+last_request_time = defaultdict(float)
+visited_content_hashes = set()
+POLITENESS_DELAY = 2  # seconds
+MIN_TEXT_LENGTH = 200  # minimum text length to consider page valuable
+MAX_HTML_SIZE = 2_000_000  # max page size in bytes (2MB)
+
+
+# Keep track of all visited URLs
+visited_urls = set()
+# Keep track of last crawl time per domain for politeness
+last_crawl_time = {}
 
 # ALLOWED_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
 
 def scraper(url, resp):
+
+    global visited_urls
+    url = normalize_url_keep_fragment(url)
+    
+    if url in visited_urls:
+        print(f"[SCRAPER] Skipping already visited: {url}")
+        return []
+    visited_urls.add(url)
+
+
+    #skip if it's already visited?
+    domain = urlparse(url).netloc
+    if time.time() - last_request_time[domain] < POLITENESS_DELAY:
+        print(f"[SCRAPER] Skipping {url} due to politeness delay")
+        return []
+
+    last_request_time[domain] = time.time()
+    
+    # Check if page is valuable (text-rich, non-duplicate, reasonable size)
+    if not resp.raw_response or resp.status != 200:
+        return []
+
+    content = resp.raw_response.content
+    if len(content) > MAX_HTML_SIZE:
+        print(f"[SCRAPER] Skipping {url} because it is too large")
+        return []
+
+    soup = BeautifulSoup(content, "html.parser")
+    text = soup.get_text(strip=True)
+    if len(text) < MIN_TEXT_LENGTH:
+        print(f"[SCRAPER] Skipping {url} because it has too little text")
+        return []
+
+    # Check for duplicate content
+    content_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
+    if content_hash in visited_content_hashes:
+        print(f"[SCRAPER] Skipping {url} because content is duplicate")
+        return []
+    visited_content_hashes.add(content_hash)
+
+    
+
+    # Extract and normalize links
     links = extract_next_links(url, resp)
-    return [link for link in links if is_valid(link)]
+    return [link for link in links if is_valid(link) and link not in visited_urls]
 
 
  # resp.url: the actual url of the page
@@ -17,6 +74,21 @@ def scraper(url, resp):
     #         resp.raw_response.url: the url, again
     #         resp.raw_response.content: the content of the page!
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
+
+
+def normalize_url_keep_fragment(url):
+    """
+    Normalize URL but keep fragment and query parameters.
+    Lowercase scheme and domain for consistency.
+    """
+    parsed = urlparse(url)
+    normalized = parsed._replace(
+        scheme=parsed.scheme.lower(),
+        netloc=parsed.netloc.lower()
+        # path, params, query, fragment stay as-is
+    )
+    return normalized.geturl()
+
 def extract_next_links(url, resp):
     # Implementation required.
     # url: the URL that was used to get the page
@@ -31,8 +103,9 @@ def extract_next_links(url, resp):
     for a_tag in soup.find_all("a", href=True):
         href = a_tag["href"]
         joined = urljoin(url, href)
-        if is_valid(joined):
-            links.add(joined)
+        normalized = normalize_url_keep_fragment(joined)
+        if is_valid(normalized):
+            links.add(normalized)
 
     print(f"[SCRAPER] Extracted {len(links)} links from {url}")
 

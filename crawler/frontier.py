@@ -62,15 +62,15 @@ class Frontier(object):
         url = normalize(url)
         print("Normalized URL: ", url)
         urlhash = get_urlhash(url)
-        print("URL hash:", urlhash)
-        print("Already in save?", urlhash in self.save)
+        # print("URL hash:", urlhash)
+        # print("Already in save?", urlhash in self.save)
         if urlhash not in self.save:
             self.save[urlhash] = (url, False)
             self.save.sync()
             self.to_be_downloaded.append(url)
             print("Added to to_be_downloaded")
-        else:
-            print("Skipped, already in save")
+       
+        
     
     def mark_url_complete(self, url):
         urlhash = get_urlhash(url)
