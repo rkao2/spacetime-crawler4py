@@ -7,14 +7,11 @@ from collections import defaultdict
 
 last_request_time = defaultdict(float)
 visited_content_hashes = set()
-POLITENESS_DELAY = 2  # seconds
-MIN_TEXT_LENGTH = 200  # minimum text length to consider page valuable
+# POLITENESS_DELAY = 2  # seconds
+# MIN_TEXT_LENGTH = 200  # minimum text length to consider page valuable
 MAX_HTML_SIZE = 2_000_000  # max page size in bytes (2MB)
 
-
-# Keep track of all visited URLs
 visited_urls = set()
-# Keep track of last crawl time per domain for politeness
 last_crawl_time = {}
 
 # ALLOWED_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
@@ -22,21 +19,14 @@ last_crawl_time = {}
 def scraper(url, resp):
 
     global visited_urls
-    url = normalize_url_keep_fragment(url)
+    url = normalize_url(url)
     
     if url in visited_urls:
         print(f"[SCRAPER] Skipping already visited: {url}")
         return []
     visited_urls.add(url)
+    
 
-
-    #skip if it's already visited?
-    domain = urlparse(url).netloc
-    if time.time() - last_request_time[domain] < POLITENESS_DELAY:
-        print(f"[SCRAPER] Skipping {url} due to politeness delay")
-        return []
-
-    last_request_time[domain] = time.time()
     
     # Check if page is valuable (text-rich, non-duplicate, reasonable size)
     if not resp.raw_response or resp.status != 200:
@@ -49,9 +39,9 @@ def scraper(url, resp):
 
     soup = BeautifulSoup(content, "html.parser")
     text = soup.get_text(strip=True)
-    if len(text) < MIN_TEXT_LENGTH:
-        print(f"[SCRAPER] Skipping {url} because it has too little text")
-        return []
+    # if len(text) < MIN_TEXT_LENGTH:
+    #     print(f"[SCRAPER] Skipping {url} because it has too little text")
+    #     return []
 
     # Check for duplicate content
     content_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
@@ -76,18 +66,24 @@ def scraper(url, resp):
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
 
 
-def normalize_url_keep_fragment(url):
-    """
-    Normalize URL but keep fragment and query parameters.
-    Lowercase scheme and domain for consistency.
-    """
+def normalize_url(url):
     parsed = urlparse(url)
+    clean_path = re.sub(r"/+", "/", parsed.path)  # remove multiple slashes
+    clean_query = "&".join(
+        sorted([
+            q for q in parsed.query.split("&")
+            if not re.match(r"(utm_|sessionid|ref|fbclid|PHPSESSID)", q)
+        ])
+    )
     normalized = parsed._replace(
         scheme=parsed.scheme.lower(),
-        netloc=parsed.netloc.lower()
-        # path, params, query, fragment stay as-is
+        netloc=parsed.netloc.lower(),
+        path=clean_path,
+        query=clean_query,
+        fragment=""  # drop fragment
     )
     return normalized.geturl()
+
 
 def extract_next_links(url, resp):
     # Implementation required.
@@ -103,7 +99,7 @@ def extract_next_links(url, resp):
     for a_tag in soup.find_all("a", href=True):
         href = a_tag["href"]
         joined = urljoin(url, href)
-        normalized = normalize_url_keep_fragment(joined)
+        normalized = normalize_url(joined)
         if is_valid(normalized):
             links.add(normalized)
 
@@ -118,14 +114,13 @@ def is_valid(url):
             return False
         
         # Check allowed domains
+        # if "wics" in parsed.netloc:
+        #     return False
         if "uci.edu" not in parsed.netloc:
             return False
         
         # Filter out non-HTML resources
-        if re.search(
-            r"\.(jpg|jpeg|png|gif|css|js|pdf|zip|mp4|mp3|avi|mov|wmv|tar|gz|dmg|exe|ico)$",
-            parsed.path.lower(),
-        ):
+        if re.search(r"(page|offset|start|p)=\d{2,}", parsed.query.lower()):
             return False
 
         return True
