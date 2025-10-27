@@ -1,12 +1,16 @@
 import re
 from urllib.parse import urljoin, urldefrag, urlparse
+import urllib.robotparser as my_robot
 from bs4 import BeautifulSoup
 import time
 import hashlib
+import requests
+import time
 from collections import defaultdict
 
 last_request_time = defaultdict(float)
 visited_content_hashes = set()
+politeness_delay = 0.5 #seconds
 # POLITENESS_DELAY = 2  # seconds
 # MIN_TEXT_LENGTH = 200  # minimum text length to consider page valuable
 MAX_HTML_SIZE = 2_000_000  # max page size in bytes (2MB)
@@ -26,13 +30,28 @@ def scraper(url, resp):
         return []
     visited_urls.add(url)
     
-
+    # Check robots.txt file
+    robots_value = find_robotsfile(url)
+    if(robots_value == False):
+        printf("[SCRAPER] Skipping {url} because not allowed by robots.txt")
+        return []
+    elif(robots_value == True):
+        # Use default politeness delay
+        time.sleep(politeness_delay)
+    elif(isinstance(robots_value, int) or isinstance(robots_value, float)):
+        # Use robots politeness delay
+        time.sleep(robots_value)
     
     # Check if page is valuable (text-rich, non-duplicate, reasonable size)
     if not resp.raw_response or resp.status != 200:
         return []
 
+
     content = resp.raw_response.content
+    if len(content) == 0:
+        printf("[SCRAPER] Skipping {url} because no content")
+        return []
+
     if len(content) > MAX_HTML_SIZE:
         print(f"[SCRAPER] Skipping {url} because it is too large")
         return []
@@ -65,10 +84,32 @@ def scraper(url, resp):
     #         resp.raw_response.content: the content of the page!
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
 
+def find_robotsfile(url):
+    """
+    Parses through the robots.txt file of a url; returns False if not allowed to parse by robots.txt, True if 
+    allowed but no crawl delay, or the crawl delay value
+    """
+    parsed = urlparse(url)
+    domain = parsed.scheme + "://" + parsed.netloc
+    robot_domain = domain + "/robots.txt"
+    robot_parser = my_robot.RobotFileParser()
+    robot_parser.set_url(robot_domain)
+    robot_parser.read()
+    if (robot_parser.can_fetch("*", domain)):
+        print("Allowed to scrape by robots.txt")
+        crawl_delay = robot_parser.crawl_delay("*")
+        if (crawl_delay):
+            return crawl_delay
+        else:
+            return True
+    else:
+        return False
 
 def normalize_url(url):
     parsed = urlparse(url)
     clean_path = re.sub(r"/+", "/", parsed.path)  # remove multiple slashes
+    if (clean_path != "/" and clean_path.endswith("/")): # remove ending slash
+        clean_path = clean_path[:-1]
     clean_query = "&".join(
         sorted([
             q for q in parsed.query.split("&")
