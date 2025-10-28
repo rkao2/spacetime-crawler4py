@@ -1,5 +1,6 @@
 import re
-from urllib.parse import urljoin, urldefrag, urlparse
+from urllib.parse import urljoin, urldefrag, urlparse, parse_qsl
+import urllib.robotparser as my_robot
 from bs4 import BeautifulSoup
 import time
 import hashlib
@@ -10,6 +11,7 @@ visited_content_hashes = set()
 # POLITENESS_DELAY = 2  # seconds
 # MIN_TEXT_LENGTH = 200  # minimum text length to consider page valuable
 MAX_HTML_SIZE = 2_000_000  # max page size in bytes (2MB)
+politeness_delay = 0.5
 
 visited_urls = set()
 last_crawl_time = {}
@@ -26,7 +28,18 @@ def scraper(url, resp):
         return []
     visited_urls.add(url)
     
-
+    # Check robots.txt file
+    robots_value = find_robotsfile(url)
+    if(robots_value == False):
+        print(f"[SCRAPER] Skipping {url} because not allowed by robots.txt")
+        return []
+    elif(robots_value == True):
+        # Use default politeness delay
+        time.sleep(politeness_delay)
+    elif(isinstance(robots_value, int) or isinstance(robots_value, float)):
+        # Use robots politeness delay
+        print(f"Crawl delay {robots_value}")
+        time.sleep(robots_value)
     
     # Check if page is valuable (text-rich, non-duplicate, reasonable size)
     if not resp.raw_response or resp.status != 200:
@@ -66,15 +79,53 @@ def scraper(url, resp):
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
 
 
+def find_robotsfile(url):
+    """
+    Parses through the robots.txt file of a url; returns False if not allowed to parse by robots.txt, True if 
+    allowed but no crawl delay, or the crawl delay value
+    """
+    parsed = urlparse(url)
+    domain = parsed.scheme + "://" + parsed.netloc
+    robot_domain = domain + "/robots.txt"
+    robot_parser = my_robot.RobotFileParser()
+    robot_parser.set_url(robot_domain)
+    try:
+        robot_parser.read()
+    except:
+        print("ERROR reading robot txt")
+        return True
+    if (robot_parser.can_fetch("*", domain)):
+        print("Allowed to scrape by robots.txt")
+        crawl_delay = robot_parser.crawl_delay("*")
+        print(f"Crawl delay {crawl_delay}")
+        if (crawl_delay is not None):
+            return crawl_delay
+        else:
+            return True
+    else:
+        return False
+
 def normalize_url(url):
     parsed = urlparse(url)
     clean_path = re.sub(r"/+", "/", parsed.path)  # remove multiple slashes
-    clean_query = "&".join(
-        sorted([
-            q for q in parsed.query.split("&")
-            if not re.match(r"(utm_|sessionid|ref|fbclid|PHPSESSID)", q)
-        ])
-    )
+    query_pairs = parse_qsl(parsed.query)
+    list_query = []
+
+    #check if ends in zip file
+    if(url.lower().endswith(".zip")):
+        return None
+    
+    # potential queries to skip "tab", "tab_files", "tab_details", "tab_history", 
+    for key, value in query_pairs:
+        if(re.match(r"(utm_|sessionid|ref|fbclid|PHPSESSID)", key)):
+            continue
+        if(key in {"ns", "media", "image", "do"}):
+            continue
+        key_val = "=".join([key,value])
+        list_query.append(key_val)
+    clean_query = "&".join(list_query)
+
+
     normalized = parsed._replace(
         scheme=parsed.scheme.lower(),
         netloc=parsed.netloc.lower(),
@@ -100,7 +151,7 @@ def extract_next_links(url, resp):
         href = a_tag["href"]
         joined = urljoin(url, href)
         normalized = normalize_url(joined)
-        if is_valid(normalized):
+        if normalized and is_valid(normalized):
             links.add(normalized)
 
     print(f"[SCRAPER] Extracted {len(links)} links from {url}")
