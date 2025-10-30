@@ -41,13 +41,18 @@ def scraper(url, resp):
         print(f"Crawl delay {robots_value}")
         time.sleep(robots_value)
     
+    print(f"after sleep here")
     # Check if page is valuable (text-rich, non-duplicate, reasonable size)
     if not resp.raw_response or resp.status != 200:
         return []
 
+    print(f"RESPONSE IS {resp.raw_response}")
     content = resp.raw_response.content
     if len(content) > MAX_HTML_SIZE:
         print(f"[SCRAPER] Skipping {url} because it is too large")
+        return []
+    if len(content) == 0:
+        print(f"[SCRAPER] Skipping {url} because no content!")
         return []
 
     soup = BeautifulSoup(content, "html.parser")
@@ -112,8 +117,10 @@ def normalize_url(url):
     list_query = []
 
     #check if ends in zip file
-    if(url.lower().endswith(".zip")):
+    if re.search(r"\.(ps\.Z|ps|pdf|zip|tar\.gz|py|exe|jpg|png|gif|mp4)$", parsed.path, re.IGNORECASE):
         return None
+    # if(url.lower().endswith(".zip")):
+    #     return None
     
     # potential queries to skip "tab", "tab_files", "tab_details", "tab_history", 
     for key, value in query_pairs:
@@ -149,10 +156,13 @@ def extract_next_links(url, resp):
 
     for a_tag in soup.find_all("a", href=True):
         href = a_tag["href"]
-        joined = urljoin(url, href)
-        normalized = normalize_url(joined)
-        if normalized and is_valid(normalized):
-            links.add(normalized)
+        try: 
+            joined = urljoin(url, href)
+            normalized = normalize_url(joined)
+            if normalized and is_valid(normalized):
+                links.add(normalized)
+        except ValueError:
+            continue
 
     print(f"[SCRAPER] Extracted {len(links)} links from {url}")
 
