@@ -29,13 +29,13 @@ class Frontier(object):
         self.save = shelve.open(self.config.save_file)
         if restart:
             for url in self.config.seed_urls:
-                self.add_url(url)
+                self.add_url([url, 0])
         else:
             # Set the frontier state with contents of save file.
             self._parse_save_file()
             if not self.save:
                 for url in self.config.seed_urls:
-                    self.add_url(url)
+                    self.add_url([url, 0])
 
         print("TO_BE_DOWNLOADED after init:", self.to_be_downloaded)
 
@@ -43,9 +43,9 @@ class Frontier(object):
         ''' This function can be overridden for alternate saving techniques. '''
         total_count = len(self.save)
         tbd_count = 0
-        for url, completed in self.save.values():
+        for url, depth, completed in self.save.values():
             if not completed and is_valid(url):
-                self.to_be_downloaded.append(url)
+                self.to_be_downloaded.append([url, depth])
                 tbd_count += 1
         self.logger.info(
             f"Found {tbd_count} urls to be downloaded from {total_count} "
@@ -59,27 +59,31 @@ class Frontier(object):
 
    
     def add_url(self, url):
-        url = normalize(url)
-        print("Normalized URL: ", url)
-        urlhash = get_urlhash(url)
+        inner_url = normalize(url[0])
+        print("Normalized URL: ", inner_url)
+        urlhash = get_urlhash(inner_url)
         # print("URL hash:", urlhash)
         # print("Already in save?", urlhash in self.save)
+        
+        url_with_depth = [inner_url, url[1]]
         if urlhash not in self.save:
-            self.save[urlhash] = (url, False)
+            self.save[urlhash] = (inner_url, url[1], False)
             self.save.sync()
-            self.to_be_downloaded.append(url)
+            self.to_be_downloaded.append(url_with_depth)
             print("Added to to_be_downloaded")
        
         
     
     def mark_url_complete(self, url):
+        url = url[0]
+        depth = url[1]
         urlhash = get_urlhash(url)
         if urlhash not in self.save:
             # This should not happen.
             self.logger.error(
                 f"Completed url {url}, but have not seen it before.")
 
-        self.save[urlhash] = (url, True)
+        self.save[urlhash] = (url, depth, True)
         self.save.sync()
 
     

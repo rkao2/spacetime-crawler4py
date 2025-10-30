@@ -4,6 +4,7 @@ import urllib.robotparser as my_robot
 from bs4 import BeautifulSoup
 import time
 import hashlib
+import string
 from collections import defaultdict
 
 last_request_time = defaultdict(float)
@@ -19,14 +20,18 @@ last_crawl_time = {}
 # ALLOWED_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
 
 def scraper(url, resp):
-
+    depth = url[1]
+    url = url[0]
+    
     global visited_urls
     url = normalize_url(url)
-    
+    if not url:
+        print(f"[SCRAPER] Skipping because not supported file type")
+        return []
     if url in visited_urls:
         print(f"[SCRAPER] Skipping already visited: {url}")
         return []
-    visited_urls.add(url)
+    
     
     # Check robots.txt file
     robots_value = find_robotsfile(url)
@@ -45,7 +50,7 @@ def scraper(url, resp):
     # Check if page is valuable (text-rich, non-duplicate, reasonable size)
     if not resp.raw_response or resp.status != 200:
         return []
-
+    visited_urls.add(url)
     print(f"RESPONSE IS {resp.raw_response}")
     content = resp.raw_response.content
     if len(content) > MAX_HTML_SIZE:
@@ -56,12 +61,22 @@ def scraper(url, resp):
         return []
 
     soup = BeautifulSoup(content, "html.parser")
-    text = soup.get_text(strip=True)
+    # text = soup.get_text(strip=True)
+    text = soup.get_text()
+    translator = str.maketrans('', '', string.punctuation)
+    cleaned_text = text.translate(translator)
+    
+    words = cleaned_text.split()
+    print("LEN OF WORDS IN PAGE IS ", len(words))
+    # for word in words:
+    #     print("WORD FROM PAGE: ", word, "\n")
+    # print("TEXT FROM SOUP ", text)
     # if len(text) < MIN_TEXT_LENGTH:
     #     print(f"[SCRAPER] Skipping {url} because it has too little text")
     #     return []
 
     # Check for duplicate content
+    
     content_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
     if content_hash in visited_content_hashes:
         print(f"[SCRAPER] Skipping {url} because content is duplicate")
@@ -72,7 +87,7 @@ def scraper(url, resp):
 
     # Extract and normalize links
     links = extract_next_links(url, resp)
-    return [link for link in links if is_valid(link) and link not in visited_urls]
+    return [(link, depth) for link in links if is_valid(link) and link not in visited_urls]
 
 
  # resp.url: the actual url of the page
@@ -124,7 +139,7 @@ def normalize_url(url):
     
     # potential queries to skip "tab", "tab_files", "tab_details", "tab_history", 
     for key, value in query_pairs:
-        if(re.match(r"(utm_|sessionid|ref|fbclid|PHPSESSID)", key)):
+        if(re.search(r"(utm_|sessionid|ref|fbclid|PHPSESSID|tribe__ecp|ical|tribe-bar)", key)):
             continue
         if(key in {"ns", "media", "image", "do"}):
             continue
@@ -177,7 +192,12 @@ def is_valid(url):
         # Check allowed domains
         # if "wics" in parsed.netloc:
         #     return False
-        if "uci.edu" not in parsed.netloc:
+        list_of_domains = ["ics.uci.edu","cs.uci.edu", "informatics.uci.edu", "stat.uci.edu"]
+        found = False
+        for domain in list_of_domains:
+            if domain in parsed.netloc:
+                found = True
+        if not found:
             return False
         
         # Filter out non-HTML resources
