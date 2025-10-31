@@ -68,16 +68,7 @@ def scraper(url, resp):
     # Extract and normalize links
     links = extract_next_links(url, resp)
     return [link for link in links if is_valid(link) and link not in visited_urls]
-
-
- # resp.url: the actual url of the page
-    # resp.status: the status code returned by the server. 200 is OK, you got the page. Other numbers mean that there was some kind of problem.
-    # resp.error: when status is not 200, you can check the error here, if needed.
-    # resp.raw_response: this is where the page actually is. More specifically, the raw_response has two parts:
-    #         resp.raw_response.url: the url, again
-    #         resp.raw_response.content: the content of the page!
-    # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
-
+ 
 
 def find_robotsfile(url):
     """
@@ -94,6 +85,7 @@ def find_robotsfile(url):
     except:
         print("ERROR reading robot txt")
         return True
+    
     if (robot_parser.can_fetch("*", domain)):
         print("Allowed to scrape by robots.txt")
         crawl_delay = robot_parser.crawl_delay("*")
@@ -165,9 +157,11 @@ def is_valid(url):
             return False
         
         # Check allowed domains
-        # if "wics" in parsed.netloc:
-        #     return False
-        if "uci.edu" not in parsed.netloc:
+        if "wics" in parsed.netloc:
+             return False
+        
+        # Filter out the calendar trap 
+        if "isg.ics.uci.edu" in parsed.netloc and parsed.path.startswith("/events/"):
             return False
         
         # Filter out non-HTML resources
