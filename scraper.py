@@ -81,8 +81,13 @@ def scraper(url, resp):
 
     # Extract and normalize links
     links = extract_next_links(url, resp)
-    return [link for link in links if is_valid(link) and link not in visited_urls]
- 
+    valid_links = [link for link in links if is_valid(link)]
+    visited_urls.add(url)
+
+    print(f"[SCRAPER] Returning {len(valid_links)} new links from {url}")
+    return valid_links
+    #return [link for link in links if is_valid(link) and link not in visited_urls]
+    
 
 
 def find_robotsfile(url):
@@ -185,15 +190,22 @@ def is_valid(url):
             return False
         
         # Check allowed domains
-        if "wics" in parsed.netloc:
-             return False
-        
+        allowed_domains = (
+            "ics.uci.edu",
+            "cs.uci.edu",
+            "informatics.uci.edu",
+            "stat.uci.edu",
+        )
+
         # Filter out the calendar trap 
-        if "isg.ics.uci.edu" in parsed.netloc and parsed.path.startswith("/events/"):
+        if not any(domain in parsed.netloc for domain in allowed_domains):
             return False
         
         # Filter out non-HTML resources
         if re.search(r"(page|offset|start|p)=\d{2,}", parsed.query.lower()):
+            return False
+
+        if "calendar" in parsed.path or "event" in parsed.path:
             return False
 
         return True
