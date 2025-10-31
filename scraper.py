@@ -8,9 +8,9 @@ from collections import defaultdict
 
 last_request_time = defaultdict(float)
 visited_content_hashes = set()
-# POLITENESS_DELAY = 2  # seconds
+
 # MIN_TEXT_LENGTH = 200  # minimum text length to consider page valuable
-MAX_HTML_SIZE = 2_000_000  # max page size in bytes (2MB)
+# MAX_HTML_SIZE = 2_000_000  # max page size in bytes (2MB)
 politeness_delay = 0.5
 
 visited_urls = set()
@@ -45,11 +45,16 @@ def scraper(url, resp):
     if not resp.raw_response or resp.status != 200:
         return []
 
+    
     content = resp.raw_response.content
+
+    """
     if len(content) > MAX_HTML_SIZE:
         print(f"[SCRAPER] Skipping {url} because it is too large")
         return []
 
+    """
+    
     soup = BeautifulSoup(content, "html.parser")
     text = soup.get_text(strip=True)
     # if len(text) < MIN_TEXT_LENGTH:
@@ -62,8 +67,6 @@ def scraper(url, resp):
         print(f"[SCRAPER] Skipping {url} because content is duplicate")
         return []
     visited_content_hashes.add(content_hash)
-
-    
 
     # Extract and normalize links
     links = extract_next_links(url, resp)
@@ -86,6 +89,7 @@ def find_robotsfile(url):
         print("ERROR reading robot txt")
         return True
     
+    """
     if (robot_parser.can_fetch("*", domain)):
         print("Allowed to scrape by robots.txt")
         crawl_delay = robot_parser.crawl_delay("*")
@@ -96,37 +100,49 @@ def find_robotsfile(url):
             return True
     else:
         return False
+    """
+
+    can_fetch = robot_parser.can_fetch("*", url)
+    if not can_fetch:
+        return False
+
+    crawl_delay = robot_parser.crawl_delay("*")
+    if crawl_delay is not None:
+        return crawl_delay
+    return True
+    
 
 def normalize_url(url):
-    parsed = urlparse(url)
-    clean_path = re.sub(r"/+", "/", parsed.path)  # remove multiple slashes
-    query_pairs = parse_qsl(parsed.query)
-    list_query = []
+    try:
+        parsed = urlparse(url)
+        clean_path = re.sub(r"/+", "/", parsed.path)  # remove multiple slashes
 
-    #check if ends in zip file
-    if(url.lower().endswith(".zip")):
+        #check if ends in zip file
+        if(url.lower().endswith(".zip")):
+            return None
+        
+        # Clean query parameters
+        query_pairs = parse_qsl(parsed.query)
+        query_list = []
+        for key, value in query_pairs:
+            if re.match(r"(utm_|sessionid|ref|fbclid|PHPSESSID)", key):
+                continue
+            if key in {"ns", "media", "image", "do"}:
+                continue
+            query_list.append(f"{key}={value}")
+        clean_query = "&".join(query_list)
+
+
+        normalized = parsed._replace(
+            scheme=parsed.scheme.lower(),
+            netloc=parsed.netloc.lower(),
+            path=clean_path,
+            query=clean_query,
+            fragment=""  # drop fragment
+        )
+        return normalized.geturl()
+    except Exception:
         return None
-    
-    # potential queries to skip "tab", "tab_files", "tab_details", "tab_history", 
-    for key, value in query_pairs:
-        if(re.match(r"(utm_|sessionid|ref|fbclid|PHPSESSID)", key)):
-            continue
-        if(key in {"ns", "media", "image", "do"}):
-            continue
-        key_val = "=".join([key,value])
-        list_query.append(key_val)
-    clean_query = "&".join(list_query)
-
-
-    normalized = parsed._replace(
-        scheme=parsed.scheme.lower(),
-        netloc=parsed.netloc.lower(),
-        path=clean_path,
-        query=clean_query,
-        fragment=""  # drop fragment
-    )
-    return normalized.geturl()
-
 
 def extract_next_links(url, resp):
     # Implementation required.
@@ -171,5 +187,5 @@ def is_valid(url):
         return True
 
     except TypeError:
-        print("TypeError for ", url)
+        # print("TypeError for ", url)
         return False
