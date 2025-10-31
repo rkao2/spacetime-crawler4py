@@ -1,5 +1,6 @@
 from threading import Thread
 
+
 from inspect import getsource
 from utils.download import download
 from utils import get_logger
@@ -23,8 +24,10 @@ class Worker(Thread):
             tbd_url = self.frontier.get_tbd_url()
             if not tbd_url:
                 break
+
             resp = download(tbd_url, self.config, self.logger)
-            scraped_urls = scraper(tbd_url, resp, frontier=self.frontier)
+            
+            scraped_urls = scraper.scraper(tbd_url, resp)
             for url in scraped_urls:
                 self.frontier.add_url(url, html_content=resp.raw_response.text)
             self.frontier.mark_url_complete(tbd_url)

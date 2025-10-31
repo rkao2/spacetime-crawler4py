@@ -23,10 +23,21 @@ def scraper(url, resp):
     global visited_urls
     url = normalize_url(url)
     
+    # already visited
     if url in visited_urls:
         print(f"[SCRAPER] Skipping already visited: {url}")
         return []
     visited_urls.add(url)
+
+    # politeness per domain
+    domain = urlparse(url).netloc
+    last_time = last_request_time.get(domain, 0)
+    elapsed = time.time() - last_time
+    if elapsed < politeness_delay:
+        time.sleep(politeness_delay - elapsed)
+    last_request_time[domain] = time.time()
+
+
     
     # Check robots.txt file
     robots_value = find_robotsfile(url)
@@ -72,6 +83,7 @@ def scraper(url, resp):
     links = extract_next_links(url, resp)
     return [link for link in links if is_valid(link) and link not in visited_urls]
  
+
 
 def find_robotsfile(url):
     """

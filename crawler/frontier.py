@@ -102,34 +102,19 @@ class Frontier(object):
             self.to_be_downloaded.put(url)
 
        
-    def get_tbd_url(self):
-        while True:
-            try:
-                url = self.to_be_downloaded.get(timeout=1)
-            except Empty:
-                return None
-
-            domain = urlparse(url).netloc
-            with self.lock:
-                last_time = self.domain_last_access.get(domain, 0)
-                elapsed = time.time() - last_time
-                if elapsed < 0.5:  # 500ms politeness
-                    self.to_be_downloaded.put(url)
-                    time.sleep(0.5 - elapsed)
-                    continue
-                self.domain_last_access[domain] = time.time()
-                return url
+  
 
     
     def mark_url_complete(self, url):
         urlhash = get_urlhash(url)
-        if urlhash not in self.save:
-            # This should not happen.
-            self.logger.error(
-                f"Completed url {url}, but have not seen it before.")
+        with self.lock:
+            if urlhash not in self.save:
+                # This should not happen.
+                self.logger.error(
+                    f"Completed url {url}, but have not seen it before.")
 
-        self.save[urlhash] = (url, True)
-        self.save.sync()
+            self.save[urlhash] = (url, True)
+            self.save.sync()
 
     def is_near_duplicate(self, html, k=5, threshold=0.8):
         words = html.split()
