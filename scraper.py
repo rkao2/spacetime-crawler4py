@@ -1,41 +1,261 @@
 import re
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urldefrag, urlparse, parse_qsl
+import urllib.robotparser as my_robot
+from bs4 import BeautifulSoup
+import time
+import hashlib
+import string
+from collections import defaultdict, Counter
 
+last_request_time = defaultdict(float)
+visited_content_hashes = set()
+word_freq = Counter()
+longest_url = None
+longest_wordcount = 0
+ics_subdomains = defaultdict(set)
+STOPWORDS = {
+
+}
+# POLITENESS_DELAY = 2  # seconds
+# MIN_TEXT_LENGTH = 200  # minimum text length to consider page valuable
+MAX_HTML_SIZE = 2_000_000  # max page size in bytes (2MB)
+politeness_delay = 0.5
+
+visited_urls = set()
+last_crawl_time = {}
+
+# ALLOWED_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
 
 def scraper(url, resp):
-    links = extract_next_links(url, resp)
-    return [link for link in links if is_valid(link)]
+    depth = url[1]
+    url = url[0]
+    
+    global visited_urls, longest_url, longest_wordcount
+    url = normalize_url(url)
+    if not url:
+        print(f"[SCRAPER] Skipping because not supported file type")
+        return []
+    if url in visited_urls:
+        print(f"[SCRAPER] Skipping already visited: {url}")
+        return []
+    
+    
+    # Check robots.txt file
+    robots_value = find_robotsfile(url)
+    if(robots_value == False):
+        print(f"[SCRAPER] Skipping {url} because not allowed by robots.txt")
+        return []
+    elif(robots_value == True):
+        # Use default politeness delay
+        time.sleep(politeness_delay)
+    elif(isinstance(robots_value, int) or isinstance(robots_value, float)):
+        # Use robots politeness delay
+        print(f"Crawl delay {robots_value}")
+        time.sleep(robots_value)
+    
+    print(f"after sleep here")
+    # Check if page is valuable (text-rich, non-duplicate, reasonable size)
+    if not resp.raw_response or resp.status != 200:
+        return []
+    visited_urls.add(url)
+    print(f"RESPONSE IS {resp.raw_response}")
+    content = resp.raw_response.content
+    if len(content) > MAX_HTML_SIZE:
+        print(f"[SCRAPER] Skipping {url} because it is too large")
+        return []
+    if len(content) == 0:
+        print(f"[SCRAPER] Skipping {url} because no content!")
+        return []
 
-def extract_next_links(url, resp):
-    # Implementation required.
-    # url: the URL that was used to get the page
-    # resp.url: the actual url of the page
+    soup = BeautifulSoup(content, "html.parser")
+    # text = soup.get_text(strip=True)
+    text = soup.get_text()
+    translator = str.maketrans('', '', string.punctuation)
+    cleaned_text = text.translate(translator)
+    
+    words = [w.lower() for w in cleaned_text.split() if w]
+
+    # Check for duplicate content
+    
+    content_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
+    if content_hash in visited_content_hashes:
+        print(f"[SCRAPER] Skipping {url} because content is duplicate")
+        return []
+    visited_content_hashes.add(content_hash)
+
+    page_wordcount = 0
+    for w in words:
+        if w in STOPWORDS:
+            continue
+        if len(w) == 1:
+            continue
+        word_freq[w] += 1
+        page_wordcount += 1
+
+    if page_wordcount > longest_wordcount:
+        longest_wordcount = page_wordcount
+        longest_url = url
+
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    if host.endswith("ics.uci.edu"):
+        ics_subdomains[host].add(url)
+    
+    print(f"[Scraper] {url} had {page_wordcount} non-stopwords")
+    
+
+    # Extract and normalize links
+    links = extract_next_links(url, resp)
+    return [(link, depth) for link in links if is_valid(link) and link not in visited_urls]
+
+
+ # resp.url: the actual url of the page
     # resp.status: the status code returned by the server. 200 is OK, you got the page. Other numbers mean that there was some kind of problem.
     # resp.error: when status is not 200, you can check the error here, if needed.
     # resp.raw_response: this is where the page actually is. More specifically, the raw_response has two parts:
     #         resp.raw_response.url: the url, again
     #         resp.raw_response.content: the content of the page!
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
-    return list()
+
+
+def find_robotsfile(url):
+    """
+    Parses through the robots.txt file of a url; returns False if not allowed to parse by robots.txt, True if 
+    allowed but no crawl delay, or the crawl delay value
+    """
+    parsed = urlparse(url)
+    domain = parsed.scheme + "://" + parsed.netloc
+    robot_domain = domain + "/robots.txt"
+    robot_parser = my_robot.RobotFileParser()
+    robot_parser.set_url(robot_domain)
+    try:
+        robot_parser.read()
+    except:
+        print("ERROR reading robot txt")
+        return True
+    if (robot_parser.can_fetch("*", domain)):
+        print("Allowed to scrape by robots.txt")
+        crawl_delay = robot_parser.crawl_delay("*")
+        print(f"Crawl delay {crawl_delay}")
+        if (crawl_delay is not None):
+            return crawl_delay
+        else:
+            return True
+    else:
+        return False
+
+def normalize_url(url):
+    parsed = urlparse(url)
+    clean_path = re.sub(r"/+", "/", parsed.path)  # remove multiple slashes
+    query_pairs = parse_qsl(parsed.query)
+    list_query = []
+
+    #check if ends in zip file
+    if re.search(r"\.(ps\.Z|ps|pdf|zip|tar\.gz|py|exe|jpg|png|gif|mp4)$", parsed.path, re.IGNORECASE):
+        return None
+    # if(url.lower().endswith(".zip")):
+    #     return None
+    
+    # potential queries to skip "tab", "tab_files", "tab_details", "tab_history", 
+    for key, value in query_pairs:
+        if(re.search(r"(utm_|sessionid|ref|fbclid|PHPSESSID|tribe__ecp|ical|tribe-bar)", key)):
+            continue
+        if(key in {"ns", "media", "image", "do"}):
+            continue
+        key_val = "=".join([key,value])
+        list_query.append(key_val)
+    clean_query = "&".join(list_query)
+
+
+    normalized = parsed._replace(
+        scheme=parsed.scheme.lower(),
+        netloc=parsed.netloc.lower(),
+        path=clean_path,
+        query=clean_query,
+        fragment=""  # drop fragment
+    )
+    return normalized.geturl()
+
+
+def extract_next_links(url, resp):
+    # Implementation required.
+    # url: the URL that was used to get the page
+    
+    if resp.status != 200 or not resp.raw_response:
+        return []
+
+    content = resp.raw_response.content
+    soup = BeautifulSoup(content, "html.parser")
+    links = set()
+
+    for a_tag in soup.find_all("a", href=True):
+        href = a_tag["href"]
+        try: 
+            joined = urljoin(url, href)
+            normalized = normalize_url(joined)
+            if normalized and is_valid(normalized):
+                links.add(normalized)
+        except ValueError:
+            continue
+
+    print(f"Scraper: Extracted {len(links)} links from {url}")
+
+    return list(links)
 
 def is_valid(url):
-    # Decide whether to crawl this url or not. 
-    # If you decide to crawl it, return True; otherwise return False.
-    # There are already some conditions that return False.
     try:
         parsed = urlparse(url)
-        if parsed.scheme not in set(["http", "https"]):
+        if parsed.scheme not in ("http", "https"):
             return False
-        return not re.match(
-            r".*\.(css|js|bmp|gif|jpe?g|ico"
-            + r"|png|tiff?|mid|mp2|mp3|mp4"
-            + r"|wav|avi|mov|mpeg|ram|m4v|mkv|ogg|ogv|pdf"
-            + r"|ps|eps|tex|ppt|pptx|doc|docx|xls|xlsx|names"
-            + r"|data|dat|exe|bz2|tar|msi|bin|7z|psd|dmg|iso"
-            + r"|epub|dll|cnf|tgz|sha1"
-            + r"|thmx|mso|arff|rtf|jar|csv"
-            + r"|rm|smil|wmv|swf|wma|zip|rar|gz)$", parsed.path.lower())
+        
+        # Check allowed domains
+        # if "wics" in parsed.netloc:
+        #     return False
+        list_of_domains = ["ics.uci.edu","cs.uci.edu", "informatics.uci.edu", "stat.uci.edu"]
+        found = False
+        for domain in list_of_domains:
+            if domain in parsed.netloc:
+                found = True
+        if not found:
+            return False
+        
+        # Filter out non-HTML resources
+        if re.search(r"(page|offset|start|p)=\d{2,}", parsed.query.lower()):
+            return False
+
+        return True
 
     except TypeError:
-        print ("TypeError for ", parsed)
-        raise
+        print("TypeError for ", url)
+        return False
+    
+#Report helpers
+def get_top_50():
+    return word_freq.most_common(50)
+
+def get_longest_page():
+    return longest_url, longest_wordcount
+
+def get_ics_subdomain_report():
+    results = []
+    for subdomain, urls in ics_subdomains.items():
+        results.append((subdomain, len(urls)))
+    results.sort(key=lambda x: x[0])
+    return results
+
+def crawl_report():
+    print("CRAWL REPORT:")
+    print("Total pages crawled:", len(visited_urls))
+
+    lp_url, lp_wc = get_longest_page()
+    print(f"Longest page: {lp_url}")
+    print("Word count on longest page", lp_wc)
+
+    print("\nTop 50 words:")
+    for w, c in get_top_50():
+        print(f"{w}: {c}")
+    
+    print("\nICS subdomains:")
+    for sub, cnt in get_ics_subdomain_report():
+        print(f"{sub}, {cnt}")
+
