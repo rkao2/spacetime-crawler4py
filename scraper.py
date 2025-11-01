@@ -198,6 +198,22 @@ def is_valid(url):
             or "year" in parsed.query
         ):
             return False
+
+        if "gitlab.ics.uci.edu" in parsed.netloc:
+
+            if re.search(r"/-/commit|/-/tree|/-/blob|/-/merge_requests|/-/issues", parsed.path):
+                return False
+
+            if any(param in parsed.query for param in ["view=", "action=", "controller=", "id="]):
+                return False
+            
+            if re.search(r"[a-f0-9]{20,}", parsed.path):
+                return False
+            
+            if parsed.path.count("/") > 4:
+                return False
+
+            return True
         
         # Filter out non-HTML resources
         if re.search(r"(page|offset|start|p)=\d{2,}", parsed.query.lower()):
