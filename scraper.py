@@ -10,23 +10,28 @@ from collections import defaultdict, Counter
 last_request_time = defaultdict(float)
 visited_content_hashes = set()
 word_freq = Counter()
-longest_url = None
-longest_wordcount = 0
 ics_subdomains = defaultdict(set)
 
 # MIN_TEXT_LENGTH = 200  # minimum text length to consider page valuable
 MAX_HTML_SIZE = 2_000_000  # max page size in bytes (2MB)
 politeness_delay = 0.5
 
+longest_url = None
+longest_wordcount = 0
 visited_urls = set()
 last_crawl_time = {}
 visited_urls_lock = threading.RLock() 
 visited_content_lock = threading.RLock()
 
+longest_lock = threading.RLock()
+word_freq_lock = threading.RLock()
+
 
 # ALLOWED_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
 
 def scraper(url, resp):
+    global visited_urls
+    global longest_wordcount, longest_url
     depth = url[1]
     url = url[0]
 
@@ -73,20 +78,21 @@ def scraper(url, resp):
     
     # report 
     page_wordcount = 0
-    for w in words:
-        """
-        if w in STOPWORDS:
-            continue
-        """
-        
-        if len(w) == 1:
-            continue
-        word_freq[w] += 1
-        page_wordcount += 1
+    with word_freq_lock:
+        for w in words:
+            """
+            if w in STOPWORDS:
+                continue
+            """
+            if len(w) == 1:
+                continue
+            word_freq[w] += 1
+            page_wordcount += 1
 
-    if page_wordcount > longest_wordcount:
-        longest_wordcount = page_wordcount
-        longest_url = url
+    with longest_lock:
+        if page_wordcount > longest_wordcount:
+            longest_wordcount = page_wordcount
+            longest_url = url
 
     parsed = urlparse(url)
     host = parsed.netloc.lower()
@@ -96,7 +102,7 @@ def scraper(url, resp):
     print(f"[Scraper] {url} had {page_wordcount} non-stopwords")
 
     links = extract_next_links(url, resp)
-    return [(link, depth) for link in links if is_valid(link)]
+    return [(link, depth + 1) for link in links if is_valid(link)]
 
 
 def normalize_url(url):
@@ -163,9 +169,6 @@ def is_valid(url):
         if parsed.scheme not in ("http", "https"):
             return False
         
-        # Check allowed domains
-        # if "wics" in parsed.netloc:
-        #     return False
 
         list_of_domains = ["ics.uci.edu","cs.uci.edu", "informatics.uci.edu", "stat.uci.edu"]
         found = False
@@ -187,6 +190,9 @@ def is_valid(url):
             return False
         
         if "isg.ics.uci.edu" in parsed.netloc and "/events/" in parsed.path:
+            return False
+        
+        if "doku" in parsed.netloc or "doku" in parsed.path:
             return False
         
         # filtering out grape commits
