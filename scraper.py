@@ -6,6 +6,8 @@ import hashlib
 import string
 import threading
 from collections import defaultdict, Counter
+import nltk
+from nltk.corpus import stopwords
 
 last_request_time = defaultdict(float)
 visited_content_hashes = set()
@@ -25,6 +27,8 @@ visited_content_lock = threading.RLock()
 
 longest_lock = threading.RLock()
 word_freq_lock = threading.RLock()
+nltk.download('stopwords')
+english_stopwords = set(stopwords.words('english'))
 
 
 # ALLOWED_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
@@ -80,10 +84,8 @@ def scraper(url, resp):
     page_wordcount = 0
     with word_freq_lock:
         for w in words:
-            """
-            if w in STOPWORDS:
+            if w in english_stopwords:
                 continue
-            """
             if len(w) == 1:
                 continue
             word_freq[w] += 1
