@@ -5,7 +5,7 @@ from utils.download import download
 from utils import get_logger
 import scraper
 import time
-
+from threading import Thread
 
 class Worker(Thread):
     def __init__(self, worker_id, config, frontier):
@@ -20,17 +20,22 @@ class Worker(Thread):
     def run(self):
         while True:
             tbd_url = self.frontier.get_tbd_url()
-            if(tbd_url[1] > 40):
-                continue
-            
+
             my_url = tbd_url[0]
             if not my_url:
                 self.logger.info("Frontier is empty. Stopping Crawler.")
                 break
+
+            if(tbd_url[1] > 40):
+                continue
+            
+            
             resp = download(my_url, self.config, self.logger)
             self.logger.info(
                 f"Downloaded {my_url}, status <{resp.status}>, "
                 f"using cache {self.config.cache_server}.")
+            
+
             scraped_urls = scraper.scraper(tbd_url, resp)
             for scraped_url in scraped_urls:
                 print("ADDING THIS URL: ", scraped_url[0])

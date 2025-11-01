@@ -6,6 +6,7 @@ import time
 import hashlib
 import string
 from collections import defaultdict
+import threading
 
 last_request_time = defaultdict(float)
 visited_content_hashes = set()
@@ -16,78 +17,65 @@ politeness_delay = 0.5
 
 visited_urls = set()
 last_crawl_time = {}
+visited_urls_lock = threading.RLock() 
+visited_content_lock = threading.RLock()
+
 
 # ALLOWED_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
 
 def scraper(url, resp):
     depth = url[1]
     url = url[0]
-    
+
+    if resp is None or not hasattr(resp, 'raw_response') or resp.raw_response is None:
+        print(f"[SCRAPER] No response for {url}")
+        return []
+
+    if resp.status != 200:
+        print(f"[SCRAPER] Skipping {url}, status {resp.status}")
+        return []
+
     global visited_urls
     url = normalize_url(url)
     if not url:
-        print(f"[SCRAPER] Skipping because not supported file type")
-        return []
-    if url in visited_urls:
-        print(f"[SCRAPER] Skipping already visited: {url}")
-        return []
-    
-    
-    # Check robots.txt file
-    robots_value = find_robotsfile(url)
-    if(robots_value == False):
-        print(f"[SCRAPER] Skipping {url} because not allowed by robots.txt")
-        return []
-    elif(robots_value == True):
-        # Use default politeness delay
-        time.sleep(politeness_delay)
-    elif(isinstance(robots_value, int) or isinstance(robots_value, float)):
-        # Use robots politeness delay
-        print(f"Crawl delay {robots_value}")
-        time.sleep(robots_value)
-    
-    print(f"after sleep here")
-    # Check if page is valuable (text-rich, non-duplicate, reasonable size)
-    if not resp.raw_response or resp.status != 200:
-        return []
-    visited_urls.add(url)
-    print(f"RESPONSE IS {resp.raw_response}")
-    content = resp.raw_response.content
-    if len(content) > MAX_HTML_SIZE:
-        print(f"[SCRAPER] Skipping {url} because it is too large")
-        return []
-    if len(content) == 0:
-        print(f"[SCRAPER] Skipping {url} because no content!")
+        print(f"[SCRAPER] Skipping unsupported file type")
         return []
 
+    with visited_urls_lock:
+        if url in visited_urls:
+            print(f"[SCRAPER] Skipping already visited: {url}")
+            return []
+        visited_urls.add(url)
+
+    content = resp.raw_response.content
+    if len(content) == 0 or len(content) > MAX_HTML_SIZE:
+        print(f"[SCRAPER] Skipping {url} due to size")
+        return []
+
+    # Check robots.txt
+    robots_value = find_robotsfile(url)
+    if robots_value is False:
+        print(f"[SCRAPER] Not allowed by robots.txt: {url}")
+        return []
+    elif robots_value is True:
+        time.sleep(politeness_delay)
+    elif isinstance(robots_value, (int, float)):
+        time.sleep(robots_value)
+
     soup = BeautifulSoup(content, "html.parser")
-    # text = soup.get_text(strip=True)
     text = soup.get_text()
     translator = str.maketrans('', '', string.punctuation)
     cleaned_text = text.translate(translator)
-    
-    words = cleaned_text.split()
-    print("LEN OF WORDS IN PAGE IS ", len(words))
-    # for word in words:
-    #     print("WORD FROM PAGE: ", word, "\n")
-    # print("TEXT FROM SOUP ", text)
-    # if len(text) < MIN_TEXT_LENGTH:
-    #     print(f"[SCRAPER] Skipping {url} because it has too little text")
-    #     return []
 
-    # Check for duplicate content
-    
-    content_hash = hashlib.md5(text.encode("utf-8")).hexdigest()
-    if content_hash in visited_content_hashes:
-        print(f"[SCRAPER] Skipping {url} because content is duplicate")
-        return []
-    visited_content_hashes.add(content_hash)
+    content_hash = hashlib.md5(cleaned_text.encode("utf-8")).hexdigest()
+    with visited_content_lock:
+        if content_hash in visited_content_hashes:
+            print(f"[SCRAPER] Duplicate content: {url}")
+            return []
+        visited_content_hashes.add(content_hash)
 
-    
-
-    # Extract and normalize links
     links = extract_next_links(url, resp)
-    return [(link, depth) for link in links if is_valid(link) and link not in visited_urls]
+    return [(link, depth) for link in links if is_valid(link)]
 
 
  # resp.url: the actual url of the page
@@ -192,13 +180,23 @@ def is_valid(url):
         # Check allowed domains
         # if "wics" in parsed.netloc:
         #     return False
-        
+
         list_of_domains = ["ics.uci.edu","cs.uci.edu", "informatics.uci.edu", "stat.uci.edu"]
         found = False
         for domain in list_of_domains:
             if domain in parsed.netloc:
                 found = True
         if not found:
+            return False
+        
+        if "wics.ics.uci.edu" in parsed.netloc and (
+            "calendar" in parsed.path
+            or "event" in parsed.path
+            or "eventDate" in parsed.query
+            or "month" in parsed.query
+            or "day" in parsed.query
+            or "year" in parsed.query
+        ):
             return False
         
         # Filter out non-HTML resources
