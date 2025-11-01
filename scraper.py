@@ -1,15 +1,18 @@
 import re
 from urllib.parse import urljoin, urldefrag, urlparse, parse_qsl
-import urllib.robotparser as my_robot
 from bs4 import BeautifulSoup
 import time
 import hashlib
 import string
-from collections import defaultdict
 import threading
+from collections import defaultdict, Counter
 
 last_request_time = defaultdict(float)
 visited_content_hashes = set()
+word_freq = Counter()
+longest_url = None
+longest_wordcount = 0
+ics_subdomains = defaultdict(set)
 
 # MIN_TEXT_LENGTH = 200  # minimum text length to consider page valuable
 MAX_HTML_SIZE = 2_000_000  # max page size in bytes (2MB)
@@ -51,28 +54,15 @@ def scraper(url, resp):
     if len(content) == 0 or len(content) > MAX_HTML_SIZE:
         print(f"[SCRAPER] Skipping {url} due to size")
         return []
-
-
-    """
-
-    # Check robots.txt
-    robots_value = find_robotsfile(url)
-    if robots_value is False:
-        print(f"[SCRAPER] Not allowed by robots.txt: {url}")
-        return []
-    elif robots_value is True:
-        time.sleep(politeness_delay)
-    elif isinstance(robots_value, (int, float)):
-        time.sleep(robots_value)
-
-    """
     
     time.sleep(politeness_delay)
     soup = BeautifulSoup(content, "html.parser")
     text = soup.get_text()
     translator = str.maketrans('', '', string.punctuation)
     cleaned_text = text.translate(translator)
+    words = [w.lower() for w in cleaned_text.split() if w]
 
+    #checking duplicate content
     content_hash = hashlib.md5(cleaned_text.encode("utf-8")).hexdigest()
     with visited_content_lock:
         if content_hash in visited_content_hashes:
@@ -80,35 +70,33 @@ def scraper(url, resp):
             return []
         visited_content_hashes.add(content_hash)
 
+    
+    # report 
+    page_wordcount = 0
+    for w in words:
+        """
+        if w in STOPWORDS:
+            continue
+        """
+        
+        if len(w) == 1:
+            continue
+        word_freq[w] += 1
+        page_wordcount += 1
+
+    if page_wordcount > longest_wordcount:
+        longest_wordcount = page_wordcount
+        longest_url = url
+
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    if host.endswith("ics.uci.edu"):
+        ics_subdomains[host].add(url)
+    
+    print(f"[Scraper] {url} had {page_wordcount} non-stopwords")
+
     links = extract_next_links(url, resp)
     return [(link, depth) for link in links if is_valid(link)]
-
-
-
-"""
-def find_robotsfile(url):
-    parsed = urlparse(url)
-    domain = parsed.scheme + "://" + parsed.netloc
-    robot_domain = domain + "/robots.txt"
-    robot_parser = my_robot.RobotFileParser()
-    robot_parser.set_url(robot_domain)
-    try:
-        robot_parser.read()
-    except:
-        print("ERROR reading robot txt")
-        return True
-    if (robot_parser.can_fetch("*", domain)):
-        print("Allowed to scrape by robots.txt")
-        crawl_delay = robot_parser.crawl_delay("*")
-        print(f"Crawl delay {crawl_delay}")
-        if (crawl_delay is not None):
-            return crawl_delay
-        else:
-            return True
-    else:
-        return False
-
-"""
 
 
 def normalize_url(url):
@@ -188,12 +176,17 @@ def is_valid(url):
             return False
         
 
-        # filtering out all calendar traps
-        calendar_keywords = ["calendar", "events", "event", "schedule", "month", "day", "year", "date"]
-        if "uci.edu" in parsed.netloc and (
-            any(keyword in parsed.path for keyword in calendar_keywords)
-            or any(keyword in parsed.query for keyword in calendar_keywords)
+        if "wics.ics.uci.edu" in parsed.netloc and (
+            "calendar" in parsed.path
+            or "event" in parsed.path
+            or "eventdate" in parsed.query
+            or "month" in parsed.query
+            or "day" in parsed.query
+            or "year" in parsed.query
         ):
+            return False
+        
+        if "isg.ics.uci.edu" in parsed.netloc and "/events/" in parsed.path:
             return False
         
         # filtering out grape commits
@@ -227,3 +220,34 @@ def is_valid(url):
     except TypeError:
         print("TypeError for ", url)
         return False
+    
+
+#Report helpers
+def get_top_50():
+    return word_freq.most_common(50)
+
+def get_longest_page():
+    return longest_url, longest_wordcount
+
+def get_ics_subdomain_report():
+    results = []
+    for subdomain, urls in ics_subdomains.items():
+        results.append((subdomain, len(urls)))
+    results.sort(key=lambda x: x[0])
+    return results
+
+def crawl_report():
+    print("CRAWL REPORT:")
+    print("Total pages crawled:", len(visited_urls))
+
+    lp_url, lp_wc = get_longest_page()
+    print(f"Longest page: {lp_url}")
+    print("Word count on longest page", lp_wc)
+
+    print("\nTop 50 words:")
+    for w, c in get_top_50():
+        print(f"{w}: {c}")
+    
+    print("\nICS subdomains:")
+    for sub, cnt in get_ics_subdomain_report():
+        print(f"{sub}, {cnt}")
