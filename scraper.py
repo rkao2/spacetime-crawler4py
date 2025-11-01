@@ -10,7 +10,7 @@ import threading
 
 last_request_time = defaultdict(float)
 visited_content_hashes = set()
-# POLITENESS_DELAY = 2  # seconds
+
 # MIN_TEXT_LENGTH = 200  # minimum text length to consider page valuable
 MAX_HTML_SIZE = 2_000_000  # max page size in bytes (2MB)
 politeness_delay = 0.5
@@ -52,6 +52,9 @@ def scraper(url, resp):
         print(f"[SCRAPER] Skipping {url} due to size")
         return []
 
+
+    """
+
     # Check robots.txt
     robots_value = find_robotsfile(url)
     if robots_value is False:
@@ -62,6 +65,9 @@ def scraper(url, resp):
     elif isinstance(robots_value, (int, float)):
         time.sleep(robots_value)
 
+    """
+    
+    time.sleep(politeness_delay)
     soup = BeautifulSoup(content, "html.parser")
     text = soup.get_text()
     translator = str.maketrans('', '', string.punctuation)
@@ -78,20 +84,9 @@ def scraper(url, resp):
     return [(link, depth) for link in links if is_valid(link)]
 
 
- # resp.url: the actual url of the page
-    # resp.status: the status code returned by the server. 200 is OK, you got the page. Other numbers mean that there was some kind of problem.
-    # resp.error: when status is not 200, you can check the error here, if needed.
-    # resp.raw_response: this is where the page actually is. More specifically, the raw_response has two parts:
-    #         resp.raw_response.url: the url, again
-    #         resp.raw_response.content: the content of the page!
-    # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
 
-
+"""
 def find_robotsfile(url):
-    """
-    Parses through the robots.txt file of a url; returns False if not allowed to parse by robots.txt, True if 
-    allowed but no crawl delay, or the crawl delay value
-    """
     parsed = urlparse(url)
     domain = parsed.scheme + "://" + parsed.netloc
     robot_domain = domain + "/robots.txt"
@@ -112,6 +107,9 @@ def find_robotsfile(url):
             return True
     else:
         return False
+
+"""
+
 
 def normalize_url(url):
     parsed = urlparse(url)
@@ -189,15 +187,20 @@ def is_valid(url):
         if not found:
             return False
         
-        if "wics.ics.uci.edu" in parsed.netloc and (
-            "calendar" in parsed.path
-            or "event" in parsed.path
-            or "eventDate" in parsed.query
-            or "month" in parsed.query
-            or "day" in parsed.query
-            or "year" in parsed.query
+
+        # filtering out all calendar traps
+        calendar_keywords = ["calendar", "events", "event", "schedule", "month", "day", "year", "date"]
+        if "uci.edu" in parsed.netloc and (
+            any(keyword in parsed.path for keyword in calendar_keywords)
+            or any(keyword in parsed.query for keyword in calendar_keywords)
         ):
             return False
+        
+        # filtering out grape commits
+        if "grape.ics.uci.edu" in parsed.netloc:
+            if "version=" in parsed.query or "action=diff" in parsed.query:
+                return False
+
 
         if "gitlab.ics.uci.edu" in parsed.netloc:
 
