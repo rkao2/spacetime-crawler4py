@@ -22,6 +22,7 @@ longest_url = None
 longest_wordcount = 0
 visited_urls = set()
 last_crawl_time = {}
+last_request_time = {}
 visited_urls_lock = threading.RLock() 
 visited_content_lock = threading.RLock()
 
@@ -63,8 +64,9 @@ def scraper(url, resp):
     if len(content) == 0 or len(content) > MAX_HTML_SIZE:
         print(f"[SCRAPER] Skipping {url} due to size")
         return []
-    
-    time.sleep(politeness_delay)
+        
+    wait_for_politeness(url, politeness_delay)
+    # time.sleep(politeness_delay)
     soup = BeautifulSoup(content, "html.parser")
     text = soup.get_text()
     translator = str.maketrans('', '', string.punctuation)
@@ -106,6 +108,18 @@ def scraper(url, resp):
     links = extract_next_links(url, resp)
     return [(link, depth + 1) for link in links if is_valid(link)]
 
+def wait_for_politeness(url, default_delay):
+    parsed = urlparse(url)
+    domain = parsed.netloc
+    now = time.time()
+    delay = default_delay
+    
+    last_time = last_request_time.get(domain, 0)
+    elapsed = now - last_time
+    if elapsed < delay:
+        print("Sleeping ", (delay-elapsed))
+        time.sleep(delay - elapsed)
+    last_request_time[domain] = time.time()
 
 def normalize_url(url):
     parsed = urlparse(url)
