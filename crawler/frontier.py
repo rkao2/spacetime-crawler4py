@@ -56,12 +56,12 @@ class Frontier(object):
         with self.lock:
             if self.to_be_downloaded:
                 return self.to_be_downloaded.pop()
-            return NOne
+            return None
 
    
     def add_url(self, url):
         inner_url = normalize(url[0])
-        print("Normalized URL: ", inner_url)
+        # print("Normalized URL: ", inner_url)
         urlhash = get_urlhash(inner_url)
         # print("URL hash:", urlhash)
         # print("Already in save?", urlhash in self.save)

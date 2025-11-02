@@ -182,6 +182,7 @@ def extract_next_links(url, resp):
 def is_valid(url):
     try:
         parsed = urlparse(url)
+        query_params = dict(parse_qsl(parsed.query))
         if parsed.scheme not in ("http", "https"):
             return False
         
@@ -208,8 +209,6 @@ def is_valid(url):
         if "isg.ics.uci.edu" in parsed.netloc and "/events/" in parsed.path:
             return False
         
-        if "doku" in parsed.netloc or "doku" in parsed.path:
-            return False
         
         # filtering out grape commits
         if "grape.ics.uci.edu" in parsed.netloc:
